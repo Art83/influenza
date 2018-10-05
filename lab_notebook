@@ -1,1 +1,217 @@
 #Influenza miniproject
+#Project folder is ~/influenza
+# Data files(reference sequence of hemagglutinin H3N2  strain and raw sequencing reads) are presented in ~/influenza/original_files
+# Intermediate files, which are generated while working with the pipeline, are kept in ~/influenza/intermediate
+# Results are in ~/influenza/results
+
+
+
+#Workflow
+
+#  Quality control with FastQC and Trimmomatic
+
+fastqc original_files/SRR1705851.fastq -o intermediate/
+
+Started analysis of SRR1705851.fastq
+Approx 5% complete for SRR1705851.fastq
+Approx 10% complete for SRR1705851.fastq
+Approx 15% complete for SRR1705851.fastq
+Approx 20% complete for SRR1705851.fastq
+Approx 25% complete for SRR1705851.fastq
+Approx 30% complete for SRR1705851.fastq
+Approx 35% complete for SRR1705851.fastq
+Approx 40% complete for SRR1705851.fastq
+Approx 45% complete for SRR1705851.fastq
+Approx 50% complete for SRR1705851.fastq
+Approx 55% complete for SRR1705851.fastq
+Approx 60% complete for SRR1705851.fastq
+Approx 65% complete for SRR1705851.fastq
+Approx 70% complete for SRR1705851.fastq
+Approx 75% complete for SRR1705851.fastq
+Approx 80% complete for SRR1705851.fastq
+Approx 85% complete for SRR1705851.fastq
+Approx 90% complete for SRR1705851.fastq
+Approx 95% complete for SRR1705851.fastq
+Analysis complete for SRR1705851.fastq
+
+#The base quality is quite ok, however, sequence composition is biased. 
+Cut off the first 20 bp to remove the bias. 
+java -classpath ~/Documents/Trimmomatic-0.38/trimmomatic-0.38.jar org.usadellab.trimmomatic.TrimmomaticSE -phred33 original_files/ intermediate/trimmed_fastq HEADCROP:20
+It resulted in disappearing in a fews rare variants (all were errors) after calling
+with varscan. For the sake of learning more about errors and their frequency I decided to use untrimmed reads. 
+One point is taken now - some artefacts can be removed after trimming!
+The whole thing about quality control requires more training
+
+# Indexing the reference sequence with bwa
+bwa index -p intermediate/Indexed_ref_genome original_files/KF848938.1.fasta
+
+[bwa_index] Pack FASTA... 0.00 sec
+[bwa_index] Construct BWT for the packed sequence...
+[bwa_index] 0.00 seconds elapse.
+[bwa_index] Update BWT... 0.00 sec
+[bwa_index] Pack forward-only FASTA... 0.00 sec
+[bwa_index] Construct SA from BWT and Occ... 0.00 sec
+[main] Version: 0.7.17-r1188
+[main] CMD: bwa index -p intermediate/Indexed_ref_genome original_files/KF848938.1.fasta
+[main] Real time: 0.042 sec; CPU: 0.008 sec
+
+# on-liner for working with sam/bam files
+bwa mem intermediate/Indexed_ref_genome original_files/SRR1705851.fastq | samtools view -S -b - | samtools sort - intermediate/output_sorted
+
+[M::bwa_idx_load_from_disk] read 0 ALT contigs
+[bam_header_read] EOF marker is absent. The input is probably truncated.
+[M::process] read 68388 sequences (10000129 bp)...
+[M::process] read 67628 sequences (10000233 bp)...
+[M::mem_process_seqs] Processed 68388 reads in 2.903 CPU sec, 2.813 real sec
+[samopen] SAM header is present: 1 sequences.
+[M::process] read 67698 sequences (10000046 bp)...
+[M::mem_process_seqs] Processed 67628 reads in 2.523 CPU sec, 2.350 real sec
+[M::process] read 67652 sequences (10000169 bp)...
+[M::mem_process_seqs] Processed 67698 reads in 3.329 CPU sec, 3.147 real sec
+[M::process] read 68072 sequences (10000295 bp)...
+[M::mem_process_seqs] Processed 67652 reads in 3.215 CPU sec, 3.054 real sec
+[M::process] read 18827 sequences (2716992 bp)...
+[M::mem_process_seqs] Processed 68072 reads in 2.823 CPU sec, 2.707 real sec
+[M::mem_process_seqs] Processed 18827 reads in 1.346 CPU sec, 1.248 real sec
+[main] Version: 0.7.17-r1188
+[main] CMD: bwa mem intermediate/Indexed_ref_genome original_files/SRR1705851.fastq
+[main] Real time: 15.775 sec; CPU: 16.255 sec
+
+# Indexing bam file
+samtools index intermediate/output_sorted.bam
+
+# Taking a look at the mapped reads 
+
+samtools flagstat intermediate/output_sorted.bam
+
+361349 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 duplicates
+361116 + 0 mapped (99.94%:-nan%)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (-nan%:-nan%)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (-nan%:-nan%)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+
+# or for mapped 
+
+samtools view -F4 intermediate/output_sorted.bam | wc
+
+361116 5422865 136634378
+
+# and unmapped 
+samtools view -f4 intermediate/output_sorted.bam | wc
+
+233    3029   49445
+
+# The number of reads actually 3000 more than raw reads in fastqc. Apparently
+bwa mem produces multiple alignments
+
+# Creating pileup
+samtools mpileup -d100000 -f original_files/KF848938.1.fasta intermediate/output_sorted.bam > intermediate/my.pileup
+[mpileup] 1 samples in 1 input files
+
+# 100000 is far more than I need with the coverage ~35000-40000 but just played with the different options
+
+# Calling variants for common mutations 
+java -jar VarScan.v2.3.9.jar  mpileup2snp ~/influenza/intermediate/my.pileup --min-var-freq 0.95 --variants --output-vcf 1 > ~/influenza/results/VarScan_res_0.95.vcf
+
+Only SNPs will be reported
+Warning: No p-value threshold provided, so p-values will not be calculated
+Min coverage:	8
+Min reads2:	2
+Min var freq:	0.95
+Min avg qual:	15
+P-value thresh:	0.01
+Reading input from /home/arthur/influenza/intermediate/my.pileup
+1665 bases in pileup file
+5 variant positions (5 SNP, 0 indel)
+0 were failed by the strand-filter
+5 variant positions reported (5 SNP, 0 indel)
+
+# the same for rare ones
+Only SNPs will be reported
+Warning: No p-value threshold provided, so p-values will not be calculated
+Min coverage:	8
+Min reads2:	2
+Min var freq:	0.001
+Min avg qual:	15
+P-value thresh:	0.01
+Reading input from /home/arthur/influenza/intermediate/my.pileup
+1665 bases in pileup file
+5 variant positions (5 SNP, 0 indel)
+0 were failed by the strand-filter
+5 variant positions reported (22 SNP, 0 indel)
+java -jar VarScan.v2.3.9.jar  mpileup2snp ~/influenza/intermediate/my.pileup --min-var-freq 0.0001 --variants --output-vcf 1 > ~/influenza/results/VarScan_res_0.001.vcf
+
+
+
+# In total 5 common SNPs and 22 rare ones. Proceed to igv for visualization
+# Obviously most of the SNPs are artefacts
+# Working with isogenic sample (triplicate, i.e. technical replicate)
+# The same drill as with the patient data
+
+bwa mem intermediate/Indexed_ref_genome original_files/SRR1705858.fastq | samtools view -S -b - | samtools sort - intermediate/sample1_sorted
+bwa mem intermediate/Indexed_ref_genome original_files/SRR1705859.fastq | samtools view -S -b - | samtools sort - intermediate/sample2_sorted
+bwa mem intermediate/Indexed_ref_genome original_files/SRR1705860.fastq | samtools view -S -b - | samtools sort - intermediate/sample3_sorted
+samtools index intermediate/sample1_sorted.bam
+samtools index intermediate/sample2_sorted.bam
+samtools index intermediate/sample3_sorted.bam
+samtools mpileup -d100000 -f original_files/KF848938.1.fasta intermediate/sample1_sorted.bam > intermediate/my.pileup_sam1
+samtools mpileup -d100000 -f original_files/KF848938.1.fasta intermediate/sample2_sorted.bam > intermediate/my.pileup_sam2
+samtools mpileup -d100000 -f original_files/KF848938.1.fasta intermediate/sample3_sorted.bam > intermediate/my.pileup_sam3
+java -jar VarScan.v2.3.9.jar  mpileup2snp ~/influenza/intermediate/my.pileup_sam1 --min-var-freq 0.001 --variants --output-vcf 1 > ~/influenza/results/VarScan_res_sam1.vcf
+
+Only SNPs will be reported
+Warning: No p-value threshold provided, so p-values will not be calculated
+Min coverage:	8
+Min reads2:	2
+Min var freq:	0.001
+Min avg qual:	15
+P-value thresh:	0.01
+Reading input from /home/arthur/influenza/intermediate/my.pileup_sam2
+1665 bases in pileup file
+55 variant positions (55 SNP, 0 indel)
+1 were failed by the strand-filter
+54 variant positions reported (54 SNP, 0 indel)
+java -jar VarScan.v2.3.9.jar  mpileup2snp ~/influenza/intermediate/my.pileup_sam2 --min-var-freq 0.001 --variants --output-vcf 1 > ~/influenza/results/VarScan_res_sam2.vcf
+
+Only SNPs will be reported
+Warning: No p-value threshold provided, so p-values will not be calculated
+Min coverage:	8
+Min reads2:	2
+Min var freq:	0.001
+Min avg qual:	15
+P-value thresh:	0.01
+Reading input from /home/arthur/influenza/intermediate/my.pileup_sam1
+1665 bases in pileup file
+58 variant positions (58 SNP, 0 indel)
+0 were failed by the strand-filter
+58 variant positions reported (58 SNP, 0 indel)
+
+java -jar VarScan.v2.3.9.jar  mpileup2snp ~/influenza/intermediate/my.pileup_sam3 --min-var-freq 0.001 --variants --output-vcf 1 > ~/influenza/results/VarScan_res_sam3.vcf
+
+Only SNPs will be reported
+Warning: No p-value threshold provided, so p-values will not be calculated
+Min coverage:   8
+Min reads2:     2
+Min var freq:   0.001
+Min avg qual:   15
+P-value thresh: 0.01
+Reading input from /home/arthur/influenza/intermediate/my.pileup_sam3
+1665 bases in pileup file
+63 variant positions (63 SNP, 0 indel)
+0 were failed by the strand-filter
+63 variant positions reported (63 SNP, 0 indel)
+
+# Extraction frequencies of mutation in each replicate
+cat VarScan_res_sam1.vcf | awk ' NR>24 {split($10,a,":"); print $1,$2,$4,$5,a[7]}' 
+cat VarScan_res_sam2.vcf | awk ' NR>24 {split($10,a,":"); print $1,$2,$4,$5,a[7]}'
+cat VarScan_res_sam3.vcf | awk ' NR>24 {split($10,a,":"); print $1,$2,$4,$5,a[7]}'
+
+# Output is big, so I attached excel file in the project folder on github
+# Go to visualising and reporting the results
+-----------------------------------------------------------------------------------------------------------------------
